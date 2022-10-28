@@ -32,7 +32,7 @@ func (track *Track) GetLastStepsTime() map[string]time.Time {
 			lasts[step.Provider] = step.Time
 			continue
 		}
-		if last.Before(step.Time) { last = step.Time }
+		if last.Before(step.Time) { lasts[step.Provider] = step.Time }
 	}
 	return lasts
 }
