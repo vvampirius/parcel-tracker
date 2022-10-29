@@ -15,6 +15,16 @@ type User struct {
 	Watch []UserTrack
 }
 
+func (user *User) GetTrack(trackId string) *UserTrack {
+	for i, userTrack := range user.Watch {
+		if userTrack.Id == trackId {
+			return &user.Watch[i]
+		}
+	}
+	return nil
+}
+
+
 type Config struct {
 	Listen string
 	TracksPath string	`yaml:"tracks_path"`
@@ -23,4 +33,13 @@ type Config struct {
 		Token   string
 		Webhook string
 	}
+}
+
+func (config *Config) GetUser(userId int) *User {
+	for i, user := range config.Users {
+		if user.Id == userId {
+			return &config.Users[i]
+		}
+	}
+	return nil
 }

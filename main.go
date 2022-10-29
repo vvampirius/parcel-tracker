@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-const VERSION  = `0.1.1`
+const VERSION  = `0.2`
 
 var (
 	ErrorLog = log.New(os.Stderr, `error#`, log.Lshortfile)
@@ -45,12 +45,9 @@ func main() {
 	core, err := NewCore(configFile)
 	if err != nil { os.Exit(1) }
 
-	core.ScanRoutine()
+	go core.ScanRoutine()
 
-	//http.HandleFunc("/", server.Any)                      // set router
-	//http.HandleFunc("/"+TELEGRAM_API_KEY, server.TelegramUpdate)                      // set router
-	//http.HandleFunc("/prometheusAlert", server.PrometheusHook)                // set router
-	//http.HandleFunc(`/http-slave-village`, server.HttpMaster.HttpHandler)
+	http.HandleFunc("/", core.TelegramHttpHandler)
 	err = http.ListenAndServe(configFile.Config.Listen, nil) // set listen port
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
