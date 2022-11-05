@@ -156,6 +156,10 @@ func (core *Core) TelegramHttpHandler(w http.ResponseWriter, r *http.Request) {
 func (core *Core) TelegramMessage(update telegram.Update) {
 	DebugLog.Println(update.Message.From)
 	DebugLog.Println(update.Message.Text)
+	if update.Message.Text == `/list` {
+		core.ListCommand(update.Message.Chat.Id)
+		return
+	}
 	if trackId, description, url := core.StringToTrack(update.Message.Text); trackId != `` {
 		core.AddTrackMessage(update, trackId, description, url)
 		return
@@ -168,6 +172,15 @@ func (core *Core) TelegramMessage(update telegram.Update) {
 
 func (core *Core) TelegramCallback(update telegram.Update) {
 	DebugLog.Println(update.CallbackQuery.Data)
+	data := strings.Split(update.CallbackQuery.Data, `:`)
+	if data[0] == `detail` {
+		core.DetailCallback(update.CallbackQuery.Message.Chat.Id, data[1])
+		return
+	}
+	if data[0] == `remove` {
+		core.RemoveCallback(update.CallbackQuery.Message.Chat.Id, data[1])
+		return
+	}
 }
 
 // StringToTrack returns from string: track number, description, url
@@ -218,6 +231,78 @@ func (core *Core) AddTrackMessage(update telegram.Update, trackId, description, 
 	}
 }
 
+func (core *Core) ListCommand(userId int) {
+	user := core.ConfigFile.Config.GetUser(userId)
+	if user == nil {
+		ErrorLog.Println(userId, `is nil`)
+		return
+	}
+	watchCount := len(user.Watch)
+	if watchCount == 0 {
+		payload := telegram.SendMessageIntWithoutReplyMarkup{}
+		payload.Text = `Нет треков для отслеживания`
+		payload.ChatId = userId
+		core.TelegramSend(``, payload)
+		return
+	}
+	trackButtons := make([][]telegram.InlineKeyboardButton, watchCount)
+	for i, track := range user.Watch {
+		trackButtons[i] = []telegram.InlineKeyboardButton{{
+			Text: fmt.Sprintf("%s %s", track.Id, track.Description),
+			CallbackData: `detail:` + track.Id,
+		}}
+	}
+	payload := telegram.SendMessageIntWithInlineKeyboardMarkup{
+		ReplyMarkup: telegram.InlineKeyboardMarkup{
+			InlineKeyboard: trackButtons,
+		},
+	}
+	payload.Text = fmt.Sprintf("У вас %d треков в списке слежения:", watchCount)
+	payload.ChatId = userId
+	core.TelegramSend(``, payload)
+}
+
+func (core *Core) DetailCallback(userId int, trackId string) {
+	DebugLog.Println(userId, trackId)
+	user := core.ConfigFile.Config.GetUser(userId)
+	track := user.GetTrack(trackId)
+	message := bytes.NewBufferString(fmt.Sprintln(trackId))
+	if track.Description != `` { fmt.Fprintln(message, track.Description) }
+	if track.Url != `` { fmt.Fprintln(message, track.Url) }
+	if !track.Added.IsZero() { fmt.Fprintf(message, "Добавлен: %s\n", track.Added.Add(3 * time.Hour).Format("2 Jan 15:04"))}
+	payload := telegram.SendMessageIntWithInlineKeyboardMarkup{
+		ReplyMarkup: telegram.InlineKeyboardMarkup{
+			InlineKeyboard: [][]telegram.InlineKeyboardButton{{
+				//telegram.InlineKeyboardButton{Text: `Описание`, CallbackData: `description:` + trackId},
+				//telegram.InlineKeyboardButton{Text: `URL`, CallbackData: `url:` + trackId},
+				telegram.InlineKeyboardButton{Text: `Удалить`, CallbackData: `remove:` + trackId},
+			}},
+		},
+	}
+	payload.Text = message.String()
+	payload.ChatId = userId
+	core.TelegramSend(``, payload)
+}
+
+func (core *Core) RemoveCallback(userId int, trackId string) {
+	DebugLog.Println(userId, trackId)
+	user := core.ConfigFile.Config.GetUser(userId)
+	newWatch := make([]config.UserTrack, 0)
+	for _, track := range user.Watch {
+		if track.Id == trackId { continue }
+		newWatch = append(newWatch, track)
+	}
+	user.Watch = newWatch
+	if err := core.ConfigFile.Save(); err != nil {
+		payload := telegram.SendMessageIntWithoutReplyMarkup{}
+		payload.ChatId = userId
+		ErrorLog.Println(err.Error())
+		payload.Text = err.Error()
+		core.TelegramSend(``, payload)
+		return
+	}
+	core.ListCommand(userId)
+}
 
 
 func NewCore(configFile *config.ConfigFile) (*Core, error) {
