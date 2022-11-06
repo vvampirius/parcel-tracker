@@ -98,11 +98,7 @@ func (core *Core) NotifyUser(userId int, userTrack config.UserTrack, updateMessa
 
 func (core *Core) NotifyUsers(trackId string, steps []TrackStep) {
 	updateMessage := bytes.NewBuffer(nil)
-	isImportant := false
-	for _, step := range steps {
-		fmt.Fprintf(updateMessage, "%s %s %s\n", step.Time.Format(`02.01 15:04`), step.Place, step.Event)
-		if step.Important { isImportant = true }
-	}
+	isImportant, _ := WriteSteps(updateMessage, steps)
 	for userId, userTrack := range core.GetUsersToNotify(trackId) {
 		DebugLog.Println(`Notify user`, userId)
 		core.NotifyUser(userId, userTrack, updateMessage.Bytes(), isImportant)
@@ -270,6 +266,11 @@ func (core *Core) DetailCallback(userId int, trackId string) {
 	if track.Description != `` { fmt.Fprintln(message, track.Description) }
 	if track.Url != `` { fmt.Fprintln(message, track.Url) }
 	if !track.Added.IsZero() { fmt.Fprintf(message, "Добавлен: %s\n", track.Added.Add(3 * time.Hour).Format("2 Jan 15:04"))}
+	t := core.Tracks.Get(trackId)
+	if len(t.Steps) > 0 {
+		fmt.Fprintln(message, ``)
+		WriteSteps(message, t.Steps)
+	}
 	payload := telegram.SendMessageIntWithInlineKeyboardMarkup{
 		ReplyMarkup: telegram.InlineKeyboardMarkup{
 			InlineKeyboard: [][]telegram.InlineKeyboardButton{{

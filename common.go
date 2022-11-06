@@ -1,6 +1,10 @@
 package main
 
-import "github.com/vvampirius/parcel-tracker/belpost"
+import (
+	"fmt"
+	"github.com/vvampirius/parcel-tracker/belpost"
+	"io"
+)
 
 func IsInSliceString(where []string, what string) bool {
 	for _, value := range where {
@@ -31,4 +35,18 @@ func BelpostSteps2TrackSteps(belpostApiResponse belpost.ApiResponse) []TrackStep
 		trackSteps[trackStepsCount - 1].Important = true
 	}
 	return trackSteps
+}
+
+// WriteSteps writes report to io.Writer and returns important flag
+func WriteSteps(w io.Writer, steps []TrackStep) (bool, error) {
+	important := false
+	for _, step := range steps {
+		if _, err := fmt.Fprintf(w, "⏱%s 🏤%s: %s\n", step.Time.Format(`02.01 15:04`), step.Place, step.Event); // TODO: correct to GMT+3 ?
+		err != nil {
+			ErrorLog.Println(err.Error())
+			return important, err
+		}
+		if step.Important { important = true }
+	}
+	return important, nil
 }
