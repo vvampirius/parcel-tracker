@@ -16,7 +16,7 @@ import (
 
 var (
 	RegexpTrackDescription = regexp.MustCompile(`^\s*([A-Z]{2}\d{9}[A-z]{2})\s*(.*)$`)
-	RagexpDescriptionUrl = regexp.MustCompile(`^(.*)\s*(https?://\S+)`)
+	RegexpDescriptionUrl = regexp.MustCompile(`^(.*)\s*(https?://\S+)`)
 )
 
 type Core struct {
@@ -184,9 +184,9 @@ func (core *Core) StringToTrack(s string) (string, string, string) {
 	match := RegexpTrackDescription.FindStringSubmatch(s)
 	if len(match) != 3 { return "", "", "" }
 	track, description := match[1], match[2]
-	match = RegexpTrackDescription.FindStringSubmatch(description)
+	match = RegexpDescriptionUrl.FindStringSubmatch(description)
 	if len(match) != 3 { return track, description, `` }
-	description = strings.TrimSuffix(description, ` `)
+	description = strings.TrimSuffix(match[1], ` `)
 	return track, description, match[2]
 }
 
