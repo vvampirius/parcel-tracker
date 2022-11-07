@@ -165,6 +165,11 @@ func (core *Core) TelegramMessage(update telegram.Update) {
 		core.TelegramReplyMessage(update)
 		return
 	}
+	if update.Message.Text == `/start` {
+		core.StartCommand(update.Message.Chat.Id, fmt.Sprintf("@%s (%s %s)", update.Message.From.Username,
+			update.Message.From.FirstName, update.Message.From.LastName))
+		return
+	}
 	if update.Message.Text == `/list` {
 		core.ListCommand(update.Message.Chat.Id)
 		return
@@ -235,7 +240,13 @@ func (core *Core) AddTrackMessage(update telegram.Update, trackId, description, 
 		ErrorLog.Println(`user is nil`)
 		return
 	}
-	// TODO: check for user access
+	if !user.Unlimited && len(user.Watch) >= 3 {
+		payload := telegram.SendMessageIntWithoutReplyMarkup{}
+		payload.Text = "Извините, вы достигли лимита кол-ва треков"
+		payload.ChatId = update.Message.Chat.Id
+		core.TelegramSend(``, payload)
+		return
+	}
 	track := user.GetTrack(trackId)
 	if track != nil {
 		// TODO: send with buttons
@@ -363,6 +374,27 @@ func (core *Core) RemoveCallback(userId int, trackId string) {
 		return
 	}
 	core.ListCommand(userId)
+}
+
+func (core *Core) StartCommand(userId int, name string) {
+	if user := core.ConfigFile.Config.GetUser(userId); user == nil {
+		newUser := config.User{
+			Id: userId,
+			Name: name,
+			Watch: make([]config.UserTrack, 0),
+		}
+		core.ConfigFile.Config.Users = append(core.ConfigFile.Config.Users, newUser)
+		if err := core.ConfigFile.Save(); err != nil {
+			ErrorLog.Println(err.Error())
+		}
+	}
+	payload := telegram.SendMessageIntWithoutReplyMarkup{}
+	payload.ChatId = userId
+	payload.Text = core.ConfigFile.Config.StartResponse
+	payload.DisableWebPagePreview = true
+	if payload.Text != `` {
+		core.TelegramSend(``, payload)
+	}
 }
 
 

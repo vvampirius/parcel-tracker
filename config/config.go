@@ -13,6 +13,7 @@ type User struct {
 	Id int
 	Name string
 	Watch []UserTrack
+	Unlimited bool
 }
 
 func (user *User) GetTrack(trackId string) *UserTrack {
@@ -33,6 +34,7 @@ type Config struct {
 		Token   string
 		Webhook string
 	}
+	StartResponse string `yaml:"start_response"`
 }
 
 func (config *Config) GetUser(userId int) *User {
