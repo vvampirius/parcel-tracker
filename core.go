@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/vvampirius/mygolibs/telegram"
 	"github.com/vvampirius/parcel-tracker/belpost"
@@ -19,10 +20,16 @@ var (
 	RegexpDescriptionUrl = regexp.MustCompile(`^(.*)\s*(https?://\S+)`)
 )
 
+type SentForReply struct {
+	Command string
+	TrackId string
+}
+
 type Core struct {
 	ConfigFile *config.ConfigFile
 	Tracks *Tracks
 	Telegram *telegram.Api
+	SentForReply map[int]SentForReply
 }
 
 func (core *Core) GetTracksForScan() []string {
@@ -105,19 +112,21 @@ func (core *Core) NotifyUsers(trackId string, steps []TrackStep) {
 	}
 }
 
-func (core *Core) TelegramSend(method string, payload interface{}) {
+func (core *Core) TelegramSend(method string, payload interface{}) (*telegram.RequestResponse, error) {
 	if method == `` { method = `sendMessage` }
 	statusCode, response, err := core.Telegram.Request(`sendMessage`, payload)
 	if err != nil {
 		ErrorLog.Println(err.Error())
 		// TODO: prometheus counter
-		return
+		return nil, err
 	}
 	if statusCode != 200 {
-		ErrorLog.Println(statusCode, response)
+		err := errors.New(fmt.Sprintf("%d %v", statusCode, response))
+		ErrorLog.Println(err.Error())
 		// TODO: prometheus counter
-		return
+		return response, err
 	}
+	return response, nil
 }
 
 func (core *Core) TelegramHttpHandler(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +161,10 @@ func (core *Core) TelegramHttpHandler(w http.ResponseWriter, r *http.Request) {
 func (core *Core) TelegramMessage(update telegram.Update) {
 	DebugLog.Println(update.Message.From)
 	DebugLog.Println(update.Message.Text)
+	if update.Message.IsReplyToMessage() {
+		core.TelegramReplyMessage(update)
+		return
+	}
 	if update.Message.Text == `/list` {
 		core.ListCommand(update.Message.Chat.Id)
 		return
@@ -177,6 +190,31 @@ func (core *Core) TelegramCallback(update telegram.Update) {
 		core.RemoveCallback(update.CallbackQuery.Message.Chat.Id, data[1])
 		return
 	}
+	if data[0] == `description` || data[0] == `url` {
+		core.DescriptionUrlCallback(update.CallbackQuery.Message.Chat.Id, data[1], data[0])
+		return
+	}
+}
+
+func (core *Core) TelegramReplyMessage(update telegram.Update) {
+	m, found := core.SentForReply[update.Message.ReplyToMessage.Id]
+	if !found {
+		ErrorLog.Println(update.Message.ReplyToMessage.Id, `not found`)
+		return
+	}
+	user := core.ConfigFile.Config.GetUser(update.Message.Chat.Id)
+	track := user.GetTrack(m.TrackId)
+	switch m.Command {
+	case `description`:
+		track.Description = update.Message.Text
+	case `url`:
+		track.Url = update.Message.Text
+	}
+	if err := core.ConfigFile.Save(); err != nil {
+		ErrorLog.Println(err.Error())
+		return
+	}
+	core.ListCommand(update.Message.Chat.Id)
 }
 
 // StringToTrack returns from string: track number, description, url
@@ -258,6 +296,28 @@ func (core *Core) ListCommand(userId int) {
 	core.TelegramSend(``, payload)
 }
 
+func (core *Core) DescriptionUrlCallback(userId int, trackId, command string) {
+	DebugLog.Println(userId, trackId, command)
+	user := core.ConfigFile.Config.GetUser(userId)
+	track := user.GetTrack(trackId)
+	payload := telegram.SendMessageIntWithForceReply{}
+	payload.ReplyMarkup.ForceReply = true
+	payload.ReplyMarkup.InputFieldPlaceholder = `изменить`
+	payload.ChatId = userId
+	payload.Text = track.Description
+	if payload.Text == ``  { payload.Text = `не указано` }
+	response, err := core.TelegramSend(``, payload)
+	if err != nil { return }
+	if response.Result.MessageId == 0 {
+		ErrorLog.Println(`Message ID is 0`)
+		return
+	}
+	core.SentForReply[response.Result.MessageId] = SentForReply{
+		Command: command,
+		TrackId: trackId,
+	}
+}
+
 func (core *Core) DetailCallback(userId int, trackId string) {
 	DebugLog.Println(userId, trackId)
 	user := core.ConfigFile.Config.GetUser(userId)
@@ -274,8 +334,8 @@ func (core *Core) DetailCallback(userId int, trackId string) {
 	payload := telegram.SendMessageIntWithInlineKeyboardMarkup{
 		ReplyMarkup: telegram.InlineKeyboardMarkup{
 			InlineKeyboard: [][]telegram.InlineKeyboardButton{{
-				//telegram.InlineKeyboardButton{Text: `Описание`, CallbackData: `description:` + trackId},
-				//telegram.InlineKeyboardButton{Text: `URL`, CallbackData: `url:` + trackId},
+				telegram.InlineKeyboardButton{Text: `Описание`, CallbackData: `description:` + trackId},
+				telegram.InlineKeyboardButton{Text: `URL`, CallbackData: `url:` + trackId},
 				telegram.InlineKeyboardButton{Text: `Удалить`, CallbackData: `remove:` + trackId},
 			}},
 		},
@@ -327,6 +387,7 @@ func NewCore(configFile *config.ConfigFile) (*Core, error) {
 		ConfigFile: configFile,
 		Tracks: tracks,
 		Telegram: telegram.NewApi(configFile.Config.Telegram.Token),
+		SentForReply: make(map[int]SentForReply),
 	}
 	return &core, nil
 }
