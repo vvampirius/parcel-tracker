@@ -8,7 +8,6 @@ import (
 	"github.com/vvampirius/parcel-tracker/belpost"
 	"github.com/vvampirius/parcel-tracker/config"
 	"io"
-	"math/rand"
 	"net/http"
 	"regexp"
 	"strings"
@@ -26,6 +25,7 @@ type SentForReply struct {
 }
 
 type Core struct {
+	BelPostApi *belpost.Api
 	ConfigFile *config.ConfigFile
 	Tracks *Tracks
 	Telegram *telegram.Api
@@ -44,14 +44,13 @@ func (core *Core) GetTracksForScan() []string {
 }
 
 func (core *Core) ScanRoutine() {
-	rand.Seed(time.Now().Unix())
 	for {
+		DebugLog.Println(`Scan started`)
 		for _, trackId := range core.GetTracksForScan() {
 			core.ScanTrack(trackId)
-			sleepTime := time.Duration(15 + rand.Intn(4)) * time.Second
-			DebugLog.Printf(`Waiting %s before next request to Belpost API...`, sleepTime.String())
-			time.Sleep(sleepTime)
+			time.Sleep(10 * time.Millisecond)
 		}
+		DebugLog.Println(`Scan finished`)
 		time.Sleep(time.Hour)
 	}
 }
@@ -62,7 +61,7 @@ func (core *Core) ScanTrack(trackId string) int {
 	DebugLog.Printf("Track ID: '%s', is finished: %t, steps count: %d, last step: %v", trackId, track.IsFinished(), len(track.Steps), track.GetLastStepsTime())
 	if track.IsFinished() { return 0 }
 	addedSteps := make([]TrackStep, 0)
-	if belpostApiResponse, err := belpost.GetApiResponse(trackId); err == nil {
+	if belpostApiResponse, err := core.BelPostApi.Get(trackId); err == nil {
 		DebugLog.Println(belpostApiResponse)
 		trackSteps := BelpostSteps2TrackSteps(belpostApiResponse)
 		addedSteps = append(addedSteps, track.AddSteps(trackSteps)...)
@@ -416,6 +415,7 @@ func NewCore(configFile *config.ConfigFile) (*Core, error) {
 	DebugLog.Printf("Callback URL set to '%s'\n", configFile.Config.Telegram.Webhook)
 
 	core := Core{
+		BelPostApi: belpost.NewApi(),
 		ConfigFile: configFile,
 		Tracks: tracks,
 		Telegram: telegram.NewApi(configFile.Config.Telegram.Token),
