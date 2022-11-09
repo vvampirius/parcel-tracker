@@ -414,8 +414,12 @@ func NewCore(configFile *config.ConfigFile) (*Core, error) {
 	}
 	DebugLog.Printf("Callback URL set to '%s'\n", configFile.Config.Telegram.Webhook)
 
+	belpostApi := belpost.NewApi()
+	belpostApi.DebugLog = DebugLog
+	belpostApi.ErrorLog = ErrorLog
+
 	core := Core{
-		BelPostApi: belpost.NewApi(),
+		BelPostApi: belpostApi,
 		ConfigFile: configFile,
 		Tracks: tracks,
 		Telegram: telegram.NewApi(configFile.Config.Telegram.Token),

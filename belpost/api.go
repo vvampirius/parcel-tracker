@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -40,9 +41,11 @@ func (apiResponse *ApiResponse) IsFound() bool {
 type Api struct {
 	Url string
 	RequestTimeout time.Duration
-	RequestInterval func(time.Time)
+	RequestInterval func(time.Time, *log.Logger)
 	OnError func(string, error)
 	UserAgent string
+	ErrorLog *log.Logger
+	DebugLog *log.Logger
 	requestMu sync.Mutex
 	lastRequestAt time.Time
 }
@@ -52,14 +55,20 @@ func (api *Api) get(trackId string) (ApiResponse, error) {
 	request := bytes.NewBufferString(`{"number":"` + trackId + `"}`)
 	response, err := api.httpRequest(request)
 	if err != nil { return apiResponse, err }
-	if err := json.Unmarshal(response, &apiResponse); err != nil { return apiResponse, err }
+	if err := json.Unmarshal(response, &apiResponse); err != nil {
+		if api.ErrorLog != nil { api.ErrorLog.Println(trackId, err.Error()) }
+		return apiResponse, err
+	}
 	if len(apiResponse.Errors) >0 {
-		return apiResponse, errors.New(fmt.Sprintf("%v %s", apiResponse.Errors, apiResponse.Message))
+		err := errors.New(fmt.Sprintf("%v %s", apiResponse.Errors, apiResponse.Message))
+		if api.ErrorLog != nil { api.ErrorLog.Println(trackId, err.Error()) }
+		return apiResponse, err
 	}
 	return apiResponse, nil
 }
 
 func (api *Api) Get(trackId string) (ApiResponse, error) {
+	if api.DebugLog != nil { api.DebugLog.Println(`Checking`, trackId) }
 	response, err := api.get(trackId)
 	if err != nil && api.OnError != nil {
 		api.OnError(trackId, err)
@@ -71,22 +80,34 @@ func (api *Api) httpRequest(body io.Reader) ([]byte, error) {
 	api.requestMu.Lock()
 	defer api.requestMu.Unlock()
 	if api.RequestInterval != nil {
-		api.RequestInterval(api.lastRequestAt)
+		api.RequestInterval(api.lastRequestAt, api.DebugLog)
 	}
 	defer api.touchLastRequestAt()
+	if api.DebugLog != nil { api.DebugLog.Println(api.Url) }
 	request, err := http.NewRequest(http.MethodPost, api.Url, body)
-	if err != nil { return nil, err }
+	if err != nil {
+		if api.ErrorLog != nil { api.ErrorLog.Println(err.Error()) }
+		return nil, err
+	}
 	request.Header.Add(`Accept`, `application/json`)
 	request.Header.Add(`Content-Type`, `application/json`)
 	request.Header.Add(`User-Agent`, api.UserAgent)
 	client := http.Client{Timeout: api.RequestTimeout}
 	response, err := client.Do(request)
-	if err != nil { return nil, err }
+	if err != nil {
+		if api.ErrorLog != nil { api.ErrorLog.Println(err.Error()) }
+		return nil, err
+	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(response.Body)
-	if err != nil { return nil, err }
+	if err != nil {
+		if api.ErrorLog != nil { api.ErrorLog.Println(err.Error()) }
+		return nil, err
+	}
 	if response.StatusCode != 200 {
-		return nil, errors.New(fmt.Sprintf("%s: %s", response.Status, string(data)))
+		err := errors.New(fmt.Sprintf("%s: %s", response.Status, string(data)))
+		if api.ErrorLog != nil { api.ErrorLog.Println(err.Error()) }
+		return nil, err
 	}
 	return data, nil
 }
